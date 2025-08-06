@@ -79,6 +79,31 @@ ${ctx.user.paidCredits > 0 ? `💰 Paid: ${ctx.user.paidCredits}` : ''}
 
   // Settings command
   bot.command('settings', (ctx) => showSettings(ctx));
+
+  // Additional callback handlers (moved from global scope)
+  bot.action('send_file_prompt', (ctx) => {
+    ctx.answerCbQuery();
+    ctx.reply('📤 Send me any file and I\'ll show you the available conversion options!');
+  });
+
+  bot.action('back_to_start', (ctx) => {
+    ctx.answerCbQuery();
+    ctx.deleteMessage();
+    return ctx.scene.enter('start');
+  });
+
+  // Settings callbacks (placeholder for future implementation)
+  bot.action('setting_language', (ctx) => {
+    ctx.answerCbQuery('🔜 Language settings coming soon!');
+  });
+
+  bot.action('setting_notifications', (ctx) => {
+    ctx.answerCbQuery('🔜 Notification settings coming soon!');
+  });
+
+  bot.action('setting_quality', (ctx) => {
+    ctx.answerCbQuery('🔜 Quality settings coming soon!');
+  });
 }
 
 /**
@@ -336,31 +361,6 @@ async function showSettings(ctx) {
     await ctx.replyWithMarkdown(settingsText, keyboard);
   }
 }
-
-// Additional callback handlers
-bot.action('send_file_prompt', (ctx) => {
-  ctx.answerCbQuery();
-  ctx.reply('📤 Send me any file and I\'ll show you the available conversion options!');
-});
-
-bot.action('back_to_start', (ctx) => {
-  ctx.answerCbQuery();
-  ctx.deleteMessage();
-  return ctx.scene.enter('start');
-});
-
-// Settings callbacks (placeholder for future implementation)
-bot.action('setting_language', (ctx) => {
-  ctx.answerCbQuery('🔜 Language settings coming soon!');
-});
-
-bot.action('setting_notifications', (ctx) => {
-  ctx.answerCbQuery('🔜 Notification settings coming soon!');
-});
-
-bot.action('setting_quality', (ctx) => {
-  ctx.answerCbQuery('🔜 Quality settings coming soon!');
-});
 
 module.exports = {
   register,
