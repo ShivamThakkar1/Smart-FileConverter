@@ -1,0 +1,40 @@
+{
+  "name": "telegram-converter-bot",
+  "version": "1.0.0",
+  "description": "Advanced file conversion bot for Telegram with credit system and queue management",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "telegraf": "^4.15.6",
+    "mongoose": "^8.0.3",
+    "dotenv": "^16.3.1",
+    "sharp": "^0.33.1",
+    "ffmpeg-static": "^5.2.0",
+    "fluent-ffmpeg": "^2.1.2",
+    "libreoffice-convert": "^1.6.0",
+    "mammoth": "^1.6.0",
+    "pdf2pic": "^3.1.0",
+    "node-cron": "^3.0.3",
+    "uuid": "^9.0.1",
+    "axios": "^1.6.2",
+    "mime-types": "^2.1.35"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": "18.x"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "file",
+    "converter",
+    "conversion"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}
