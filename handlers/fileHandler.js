@@ -140,56 +140,91 @@ function getConversionOptions(fileType, currentExtension) {
 async function getFileInfo(ctx) {
   let fileInfo, filename, fileSize;
   
-  if (ctx.message.document) {
-    fileInfo = ctx.message.document;
-    filename = fileInfo.file_name || `document_${Date.now()}`;
-    fileSize = fileInfo.file_size;
-  } else if (ctx.message.photo) {
-    fileInfo = ctx.message.photo[ctx.message.photo.length - 1];
-    filename = `photo_${Date.now()}.jpg`;
-    fileSize = fileInfo.file_size;
-  } else if (ctx.message.audio) {
-    fileInfo = ctx.message.audio;
-    filename = fileInfo.file_name || `audio_${Date.now()}.${fileInfo.mime_type?.split('/')[1] || 'mp3'}`;
-    fileSize = fileInfo.file_size;
-  } else if (ctx.message.voice) {
-    fileInfo = ctx.message.voice;
-    filename = `voice_${Date.now()}.ogg`;
-    fileSize = fileInfo.file_size;
+  try {
+    if (ctx.message.document) {
+      fileInfo = ctx.message.document;
+      filename = fileInfo.file_name || `document_${Date.now()}`;
+      fileSize = fileInfo.file_size || 0;
+    } else if (ctx.message.photo && ctx.message.photo.length > 0) {
+      fileInfo = ctx.message.photo[ctx.message.photo.length - 1];
+      filename = `photo_${Date.now()}.jpg`;
+      fileSize = fileInfo.file_size || 0;
+    } else if (ctx.message.audio) {
+      fileInfo = ctx.message.audio;
+      filename = fileInfo.file_name || `audio_${Date.now()}.${fileInfo.mime_type?.split('/')[1] || 'mp3'}`;
+      fileSize = fileInfo.file_size || 0;
+    } else if (ctx.message.voice) {
+      fileInfo = ctx.message.voice;
+      filename = `voice_${Date.now()}.ogg`;
+      fileSize = fileInfo.file_size || 0;
+    } else {
+      throw new Error('No supported file found in message');
+    }
+    
+    if (!fileInfo || !fileInfo.file_id) {
+      throw new Error('Invalid file information received');
+    }
+    
+    return { fileInfo, filename, fileSize };
+  } catch (error) {
+    console.error('Error getting file info:', error);
+    throw error;
   }
-  
-  if (!fileInfo) {
-    throw new Error('No supported file found in message');
-  }
-  
-  return { fileInfo, filename, fileSize };
 }
 
 /**
- * Download file from Telegram
+ * Download file from Telegram with retry logic
  * @param {Object} ctx - Telegraf context
  * @param {Object} fileInfo - File information
  * @returns {string} Local file path
  */
-async function downloadFile(ctx, fileInfo) {
-  try {
-    const fileLink = await ctx.telegram.getFileLink(fileInfo.file_id);
-    const response = await fetch(fileLink);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+async function downloadFile(ctx, fileInfo, maxRetries = 3) {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`Downloading file (attempt ${attempt}/${maxRetries}): ${fileInfo.file_id}`);
+      
+      const fileLink = await ctx.telegram.getFileLink(fileInfo.file_id);
+      console.log(`File link obtained: ${fileLink}`);
+      
+      const response = await fetch(fileLink.toString());
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const buffer = await response.arrayBuffer();
+      
+      if (buffer.byteLength === 0) {
+        throw new Error('Downloaded file is empty');
+      }
+      
+      const tempPath = path.join('/tmp', `input_${Date.now()}_${fileInfo.file_id}`);
+      await fs.writeFile(tempPath, Buffer.from(buffer));
+      
+      // Verify file was written
+      const stats = await fs.stat(tempPath);
+      if (stats.size === 0) {
+        throw new Error('Failed to write file to disk');
+      }
+      
+      console.log(`File downloaded successfully: ${tempPath} (${stats.size} bytes)`);
+      return tempPath;
+      
+    } catch (error) {
+      console.error(`Download attempt ${attempt} failed:`, error);
+      lastError = error;
+      
+      if (attempt < maxRetries) {
+        // Wait before retry (exponential backoff)
+        const delay = Math.pow(2, attempt) * 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
-    
-    const buffer = await response.arrayBuffer();
-    const tempPath = path.join('/tmp', `input_${Date.now()}_${fileInfo.file_id}`);
-    
-    await fs.writeFile(tempPath, Buffer.from(buffer));
-    return tempPath;
-    
-  } catch (error) {
-    console.error('File download error:', error);
-    throw new Error('Failed to download file from Telegram');
   }
+  
+  throw new Error(`Failed to download file after ${maxRetries} attempts: ${lastError.message}`);
 }
 
 /**
@@ -204,8 +239,22 @@ async function processFile(ctx, options = {}) {
     // Show initial progress
     progressMsg = await ctx.reply('⬆️ Analyzing file...');
     
-    // Get file information
-    const { fileInfo, filename, fileSize } = await getFileInfo(ctx);
+    // Get file information with error handling
+    let fileInfo, filename, fileSize;
+    try {
+      const info = await getFileInfo(ctx);
+      fileInfo = info.fileInfo;
+      filename = info.filename;
+      fileSize = info.fileSize;
+    } catch (error) {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        progressMsg.message_id,
+        undefined,
+        '❌ Could not process this file type. Please send a supported file format.'
+      );
+      return;
+    }
     
     // Detect file type
     const fileType = detectFileType(filename, fileInfo.mime_type);
@@ -222,7 +271,7 @@ async function processFile(ctx, options = {}) {
     
     // Check file size limits
     const typeConfig = FILE_TYPES[fileType];
-    if (fileSize > typeConfig.maxSize) {
+    if (fileSize && fileSize > typeConfig.maxSize) {
       const maxSizeMB = Math.round(typeConfig.maxSize / (1024 * 1024));
       await ctx.telegram.editMessageText(
         ctx.chat.id,
@@ -274,7 +323,7 @@ async function processFile(ctx, options = {}) {
       'subtitle': '💬'
     };
     
-    const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+    const fileSizeMB = fileSize ? (fileSize / (1024 * 1024)).toFixed(1) : 'Unknown';
     
     await ctx.telegram.editMessageText(
       ctx.chat.id,
@@ -318,7 +367,7 @@ async function processFile(ctx, options = {}) {
 }
 
 /**
- * Handle file conversion
+ * Handle file conversion with improved error handling
  * @param {Object} ctx - Telegraf context
  * @param {string} targetFormat - Target conversion format
  */
@@ -339,7 +388,7 @@ async function handleConversion(ctx, targetFormat) {
     // Deduct credit first
     await deductCredit(ctx.user);
     
-    // Download file
+    // Download file with retry logic
     await ctx.editMessageText('🔄 **Converting...**\n\n⬇️ Downloading file...');
     tempInputPath = await downloadFile(ctx, session.fileInfo);
     
@@ -349,10 +398,21 @@ async function handleConversion(ctx, targetFormat) {
     const typeConfig = FILE_TYPES[session.fileType];
     const converter = typeConfig.converter;
     
+    // Check if converter exists and has convert method
+    if (!converter || typeof converter.convert !== 'function') {
+      throw new Error(`Converter not available for ${session.fileType}`);
+    }
+    
     tempOutputPath = await converter.convert(tempInputPath, targetFormat, {
-      quality: ctx.user.preferences.defaultQuality || 'medium',
+      quality: ctx.user.preferences?.defaultQuality || 'medium',
       originalName: session.filename
     });
+    
+    // Verify output file exists and has content
+    const outputStats = await fs.stat(tempOutputPath);
+    if (outputStats.size === 0) {
+      throw new Error('Conversion produced empty file');
+    }
     
     // Upload result
     await ctx.editMessageText('🔄 **Converting...**\n\n⬆️ Uploading result...');
@@ -373,6 +433,10 @@ async function handleConversion(ctx, targetFormat) {
     const processingTime = Math.round((Date.now() - conversionStart) / 1000);
     
     // Add to history
+    if (!ctx.user.history) {
+      ctx.user.history = [];
+    }
+    
     ctx.user.history.push({
       originalName: session.filename,
       fromType: session.fileType,
@@ -384,32 +448,50 @@ async function handleConversion(ctx, targetFormat) {
     });
     
     // Update total conversions counter
-    ctx.user.totalConversions += 1;
+    ctx.user.totalConversions = (ctx.user.totalConversions || 0) + 1;
+    ctx.user.totalCreditsUsed = (ctx.user.totalCreditsUsed || 0) + 1;
     await ctx.user.save();
     
     // Delete progress message and show success
-    await ctx.deleteMessage();
+    try {
+      await ctx.deleteMessage();
+    } catch (deleteError) {
+      // Ignore delete errors
+    }
+    
     await ctx.reply(`🎉 **Conversion completed!**\n\n⚡ Processed in ${processingTime}s\n💎 Credits remaining: ${ctx.user.freeCredits + ctx.user.paidCredits}`);
     
   } catch (error) {
     console.error('Conversion error:', error);
     
     // Update history with failure
+    if (!ctx.user.history) {
+      ctx.user.history = [];
+    }
+    
     ctx.user.history.push({
       originalName: session.filename,
       fromType: session.fileType,
       toType: targetFormat,
       status: 'failed',
       fileSize: session.fileSize,
-      timestamp: new Date()
+      timestamp: new Date(),
+      error: error.message
     });
-    await ctx.user.save();
+    
+    try {
+      await ctx.user.save();
+    } catch (saveError) {
+      console.error('Failed to save user history:', saveError);
+    }
     
     const errorMessages = {
       'UNSUPPORTED_FORMAT': '❌ This conversion is not supported yet.',
       'FILE_TOO_LARGE': '❌ File is too large to process.',
       'CORRUPTED_FILE': '❌ File appears to be corrupted.',
-      'PROCESSING_ERROR': '❌ Conversion failed. Please try again.'
+      'PROCESSING_ERROR': '❌ Conversion failed. Please try again.',
+      'TIMEOUT_ERROR': '❌ Conversion timed out. File may be too large.',
+      'CONVERTER_NOT_FOUND': '❌ Conversion service temporarily unavailable.'
     };
     
     const errorMessage = errorMessages[error.code] || '❌ Conversion failed. Please try again or contact support.';
@@ -421,12 +503,25 @@ async function handleConversion(ctx, targetFormat) {
     }
   } finally {
     // Cleanup temporary files
-    try {
-      if (tempInputPath) await fs.unlink(tempInputPath);
-      if (tempOutputPath) await fs.unlink(tempOutputPath);
-    } catch (cleanupError) {
-      console.error('Cleanup error:', cleanupError);
+    const cleanupPromises = [];
+    
+    if (tempInputPath) {
+      cleanupPromises.push(
+        fs.unlink(tempInputPath).catch(err => 
+          console.error('Failed to cleanup input file:', err)
+        )
+      );
     }
+    
+    if (tempOutputPath) {
+      cleanupPromises.push(
+        fs.unlink(tempOutputPath).catch(err => 
+          console.error('Failed to cleanup output file:', err)
+        )
+      );
+    }
+    
+    await Promise.all(cleanupPromises);
     
     // Clear session
     if (ctx.session) {
@@ -445,23 +540,37 @@ async function handleConversion(ctx, targetFormat) {
 function setupConversionHandlers(bot) {
   // Handle conversion format selection
   bot.action(/convert_(\w+)/, async (ctx) => {
-    await ctx.answerCbQuery();
-    
-    const targetFormat = ctx.match[1];
-    await handleConversion(ctx, targetFormat);
+    try {
+      await ctx.answerCbQuery();
+      const targetFormat = ctx.match[1];
+      await handleConversion(ctx, targetFormat);
+    } catch (error) {
+      console.error('Conversion handler error:', error);
+      await ctx.answerCbQuery('❌ Error processing conversion');
+      try {
+        await ctx.reply('❌ Something went wrong. Please try again.');
+      } catch (replyError) {
+        console.error('Failed to send error reply:', replyError);
+      }
+    }
   });
   
   // Handle conversion cancellation
-  bot.action('cancel_convert', (ctx) => {
-    ctx.answerCbQuery();
-    ctx.editMessageText('❌ Conversion cancelled.');
-    
-    // Clear session
-    if (ctx.session) {
-      delete ctx.session.fileInfo;
-      delete ctx.session.filename;
-      delete ctx.session.fileType;
-      delete ctx.session.fileSize;
+  bot.action('cancel_convert', async (ctx) => {
+    try {
+      await ctx.answerCbQuery();
+      await ctx.editMessageText('❌ Conversion cancelled.');
+      
+      // Clear session
+      if (ctx.session) {
+        delete ctx.session.fileInfo;
+        delete ctx.session.filename;
+        delete ctx.session.fileType;
+        delete ctx.session.fileSize;
+      }
+    } catch (error) {
+      console.error('Cancel conversion error:', error);
+      await ctx.answerCbQuery('Cancelled');
     }
   });
 }

@@ -26,6 +26,10 @@ const historySchema = new mongoose.Schema({
     type: Number, // in seconds
     default: 0
   },
+  error: {
+    type: String,
+    default: null
+  },
   timestamp: {
     type: Date,
     default: Date.now
@@ -36,8 +40,8 @@ const userSchema = new mongoose.Schema({
   userId: {
     type: Number,
     required: true,
-    unique: true,
-    index: true
+    unique: true
+    // Removed duplicate index: true since unique already creates an index
   },
   username: {
     type: String,
@@ -118,11 +122,12 @@ const userSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes for better performance
-userSchema.index({ userId: 1 });
+// Indexes for better performance (removed duplicate userId index)
 userSchema.index({ lastActivity: -1 });
 userSchema.index({ createdAt: -1 });
 userSchema.index({ source: 1 });
+userSchema.index({ isBanned: 1 });
+userSchema.index({ isActive: 1 });
 
 // Virtual for total available credits
 userSchema.virtual('totalCredits').get(function() {
@@ -156,6 +161,21 @@ userSchema.methods.deductCredit = function() {
   return this.save();
 };
 
+// Method to check if user has credits
+userSchema.methods.hasCredits = function() {
+  return (this.freeCredits + this.paidCredits) > 0;
+};
+
+// Method to get credit summary
+userSchema.methods.getCreditSummary = function() {
+  return {
+    free: this.freeCredits,
+    paid: this.paidCredits,
+    total: this.freeCredits + this.paidCredits,
+    used: this.totalCreditsUsed
+  };
+};
+
 // Static method to get user stats
 userSchema.statics.getStats = async function() {
   const totalUsers = await this.countDocuments();
@@ -184,6 +204,18 @@ userSchema.statics.getStats = async function() {
     activeThisWeek,
     totalConversions: totalConversions[0]?.total || 0
   };
+};
+
+// Static method to find active users
+userSchema.statics.findActiveUsers = function(days = 7) {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+  
+  return this.find({
+    lastActivity: { $gte: cutoffDate },
+    isActive: true,
+    isBanned: false
+  });
 };
 
 module.exports = mongoose.model('User', userSchema);

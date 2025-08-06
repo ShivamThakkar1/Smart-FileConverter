@@ -80,16 +80,53 @@ ${ctx.user.paidCredits > 0 ? `💰 Paid: ${ctx.user.paidCredits}` : ''}
   // Settings command
   bot.command('settings', (ctx) => showSettings(ctx));
 
-  // Additional callback handlers (moved from global scope)
+  // Additional callback handlers
   bot.action('send_file_prompt', (ctx) => {
     ctx.answerCbQuery();
     ctx.reply('📤 Send me any file and I\'ll show you the available conversion options!');
   });
 
-  bot.action('back_to_start', (ctx) => {
+  // Fixed back button handler - go back to start message instead of scene
+  bot.action('back_to_start', async (ctx) => {
     ctx.answerCbQuery();
-    ctx.deleteMessage();
-    return ctx.scene.enter('start');
+    try {
+      await ctx.deleteMessage();
+    } catch (error) {
+      // Ignore delete errors
+    }
+    
+    // Show start message again
+    const welcomeMessage = `
+🎉 **Welcome to File Converter Bot!**
+
+Transform your files instantly with these powerful features:
+
+📄 **Documents** - PDF, DOC, DOCX, TXT, RTF
+🖼 **Images** - PNG, JPG, WEBP, BMP, GIF
+🎵 **Audio** - MP3, WAV, OGG, FLAC *(coming soon)*
+📚 **eBooks** - EPUB, MOBI, FB2, CBZ
+🔤 **Fonts** - TTF, WOFF, OTF, EOT
+💬 **Subtitles** - SRT, VTT, ASS, SUB
+
+💎 **Your Credits:**
+🆓 Free: ${ctx.user.freeCredits}/${process.env.DAILY_FREE_CREDITS} (resets daily)
+${ctx.user.paidCredits > 0 ? `💰 Paid: ${ctx.user.paidCredits}` : ''}
+
+🚀 **Get Started:** Just send me any file!
+    `;
+
+    return ctx.replyWithMarkdown(welcomeMessage, 
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📋 Formats', 'formats'),
+          Markup.button.callback('📊 History', 'history')
+        ],
+        [
+          Markup.button.callback('💎 Credits', 'view_credits'),
+          Markup.button.callback('❓ Help', 'help')
+        ]
+      ])
+    );
   });
 
   // Settings callbacks (placeholder for future implementation)
@@ -158,7 +195,12 @@ Need more help? Contact @${process.env.BOT_USERNAME.replace('bot', '')}
   ]);
 
   if (ctx.callbackQuery) {
-    await ctx.editMessageText(helpText, { parse_mode: 'Markdown', ...keyboard });
+    try {
+      await ctx.editMessageText(helpText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      // If edit fails, send new message
+      await ctx.reply(helpText, { parse_mode: 'Markdown', ...keyboard });
+    }
   } else {
     await ctx.replyWithMarkdown(helpText, keyboard);
   }
@@ -188,11 +230,21 @@ async function showCredits(ctx) {
     Markup.button.callback('📋 Formats', 'formats')
   ]);
   
+  // Add back button
+  keyboard.push([Markup.button.callback('🔙 Back', 'back_to_start')]);
+  
   if (ctx.callbackQuery) {
-    await ctx.editMessageText(fullText, { 
-      parse_mode: 'Markdown', 
-      reply_markup: { inline_keyboard: keyboard }
-    });
+    try {
+      await ctx.editMessageText(fullText, { 
+        parse_mode: 'Markdown', 
+        reply_markup: { inline_keyboard: keyboard }
+      });
+    } catch (error) {
+      await ctx.reply(fullText, { 
+        parse_mode: 'Markdown', 
+        reply_markup: { inline_keyboard: keyboard }
+      });
+    }
   } else {
     await ctx.replyWithMarkdown(fullText, Markup.inlineKeyboard(keyboard));
   }
@@ -249,7 +301,11 @@ async function showFormats(ctx) {
   ]);
 
   if (ctx.callbackQuery) {
-    await ctx.editMessageText(formatsText, { parse_mode: 'Markdown', ...keyboard });
+    try {
+      await ctx.editMessageText(formatsText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      await ctx.reply(formatsText, { parse_mode: 'Markdown', ...keyboard });
+    }
   } else {
     await ctx.replyWithMarkdown(formatsText, keyboard);
   }
@@ -281,7 +337,11 @@ Send me any supported file and I'll convert it for you.
     ]);
 
     if (ctx.callbackQuery) {
-      await ctx.editMessageText(noHistoryText, { parse_mode: 'Markdown', ...keyboard });
+      try {
+        await ctx.editMessageText(noHistoryText, { parse_mode: 'Markdown', ...keyboard });
+      } catch (error) {
+        await ctx.reply(noHistoryText, { parse_mode: 'Markdown', ...keyboard });
+      }
     } else {
       await ctx.replyWithMarkdown(noHistoryText, keyboard);
     }
@@ -319,7 +379,11 @@ Send me any supported file and I'll convert it for you.
   ]);
 
   if (ctx.callbackQuery) {
-    await ctx.editMessageText(historyText, { parse_mode: 'Markdown', ...keyboard });
+    try {
+      await ctx.editMessageText(historyText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      await ctx.reply(historyText, { parse_mode: 'Markdown', ...keyboard });
+    }
   } else {
     await ctx.replyWithMarkdown(historyText, keyboard);
   }
@@ -356,7 +420,11 @@ async function showSettings(ctx) {
   ]);
 
   if (ctx.callbackQuery) {
-    await ctx.editMessageText(settingsText, { parse_mode: 'Markdown', ...keyboard });
+    try {
+      await ctx.editMessageText(settingsText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (error) {
+      await ctx.reply(settingsText, { parse_mode: 'Markdown', ...keyboard });
+    }
   } else {
     await ctx.replyWithMarkdown(settingsText, keyboard);
   }
