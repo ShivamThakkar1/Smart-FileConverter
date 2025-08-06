@@ -323,6 +323,12 @@ async function processFile(ctx, options = {}) {
       'subtitle': '💬'
     };
     
+    const escapeMarkdown = (text) => {
+      return text.replace(/([_\*\[\]()~`>#+\-=|{}.!])/g, '\\$1');
+    };
+    
+    const safeFilename = escapeMarkdown(filename);
+    const safeFileType = escapeMarkdown(fileType.charAt(0).toUpperCase() + fileType.slice(1));
     const fileSizeMB = fileSize ? (fileSize / (1024 * 1024)).toFixed(1) : 'Unknown';
     
     await ctx.telegram.editMessageText(
@@ -330,8 +336,8 @@ async function processFile(ctx, options = {}) {
       progressMsg.message_id,
       undefined,
       `${fileTypeEmoji[fileType]} **File Ready for Conversion**\n\n` +
-      `📁 **Name:** ${filename}\n` +
-      `📊 **Type:** ${fileType.charAt(0).toUpperCase() + fileType.slice(1)}\n` +
+      `📁 **Name:** ${safeFilename}\n` +
+      `📊 **Type:** ${safeFileType}\n` +
       `📏 **Size:** ${fileSizeMB}MB\n\n` +
       `⚡ **Choose output format:**`,
       {
